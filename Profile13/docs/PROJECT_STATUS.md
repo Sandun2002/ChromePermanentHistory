@@ -1,5 +1,12 @@
 # Shared archive project status
 
+Historical implementation notes, retained for reference. During the 2026-10-17
+workspace cleanup, older backup folders and completed imports were moved outside
+the project. Their original paths below describe where they existed at the time.
+See the [cleanup record](../../README.md#workspace-cleanup--2026-10-17) for recovery
+locations. References to RELAY.md and backend/ belong to the separate Android
+project; this workspace's current desktop guide is [SHARED_SYNC_SETUP.md](SHARED_SYNC_SETUP.md).
+
 ## Current mobile format — 0.5.0
 
 Migration 006 and the desktop reader now support full observed mobile HTTP(S) browsing records:

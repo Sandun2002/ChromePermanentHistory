@@ -47,9 +47,9 @@ Archived visits display 100 rows per page. The dashboard also includes a
 private Adult / NSFW search-insights section. It is a conservative keyword
 match of search URLs, intended as a review aid rather than a perfect classifier.
 
-The dashboard remains local to this PC. Optional shared sync uploads supported
-searches and full desktop HTTP(S) browsing URLs to your configured private
-Supabase project after Google sign-in. Original local records remain independent.
+The dashboard remains local to this PC. The optional Supabase relay downloads
+Android records into a separate permanent local archive. The active worker never
+uploads desktop history. Original local records remain independent.
 
 At the top of the dashboard, the Collector Status panel shows whether the
 background collector is running, its latest update, archive availability, and
@@ -86,22 +86,26 @@ history but are not copied into this permanent archive:
   whole Profile13 folder.
 
 
-## Shared desktop + Android archive (0.3.0)
+## Android relay (0.5.0)
 
-**Superseded by 0.4.0 temporary relay mode.** The PC now permanently retains history and
-never uploads desktop records. Mobile searches are deleted from Supabase only after durable
-local saving and exact verification. See [the current guide](SHARED_SYNC_SETUP.md).
-Back up both PermanentChromeHistory.sqlite and SharedArchive.sqlite.
+The PC permanently retains downloaded records in SharedArchive.sqlite. Cloud
+records are consumed only after local commit and exact verification. Back up both
+PermanentChromeHistory.sqlite and SharedArchive.sqlite using SQLite's backup API.
 
-Shared sync is installed but not connected until one-time Supabase/Google setup
-and sign-in on both devices. Expand Shared desktop + Android archive in the
-dashboard. Use the same project URL, public key, and Google account as Android.
-The original collector and its archive are preserved. SharedArchive.sqlite is a
-separate queue/cache; .cloud-sync.dpapi protects Windows credentials. A separate
-Windows Startup entry runs the sync daemon even when the dashboard is closed.
+Expand Shared desktop + Android archive in the dashboard. Use the same project,
+public key, and Google account as Android. The .cloud-sync.dpapi file protects
+Windows credentials. A separate Windows Startup entry runs the relay daemon even
+when the dashboard is closed.
 
-Follow [the setup guide](SHARED_SYNC_SETUP.md). The ready-to-run new-project SQL
-is [SETUP_SHARED.sql](SETUP_SHARED.sql). For a consistent whole-folder backup,
-stop the collector, dashboard, and sync daemon, or use SQLite backup APIs.
-Android 0.3.0 can download shared searches and desktop web visits; Android
-automatic capture still depends on exposed search URLs and tab-mode options.
+Follow [the current setup guide](docs/SHARED_SYNC_SETUP.md). New-project SQL is
+[SETUP_SHARED.sql](docs/SETUP_SHARED.sql). Earlier implementation and verification
+notes are retained in [PROJECT_STATUS.md](docs/PROJECT_STATUS.md); its older
+sections describe historical states, not current runtime health.
+
+## Folder layout
+
+The four active Python modules and Windows launchers stay here beside the live
+data. Supporting guides and SQL are grouped in docs/. Databases, credentials,
+exports, logs, and caches are excluded from Git. Completed one-time tools and old
+backup folders were archived outside the project; see the
+[workspace cleanup record](../README.md#workspace-cleanup--2026-10-17).

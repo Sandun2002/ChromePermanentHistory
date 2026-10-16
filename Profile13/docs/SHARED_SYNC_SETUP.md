@@ -32,7 +32,7 @@ records had been retained and checked on the PC, including the initial wrong-acc
 ## This installation
 
 - Archive account: **jenukivinupama@gmail.com** on desktop and Android DataSync.
-- Project URL and public publishable key: [PROJECT_CONNECTION.json](PROJECT_CONNECTION.json).
+- Project URL and public publishable key: local `Profile13/PROJECT_CONNECTION.json` (excluded from Git).
 - Desktop original database: `C:\ChromePermanentHistory\Profile13\PermanentChromeHistory.sqlite`.
 - Permanent mobile/legacy cloud copies: `C:\ChromePermanentHistory\Profile13\SharedArchive.sqlite`.
 - Dashboard: `http://127.0.0.1:8765/`. The Startup relay worker runs when Windows is signed in.
@@ -102,8 +102,8 @@ independently of whether a possible duplicate is grouped.
 
 ## Deploying to another project
 
-New projects: run `backend/SETUP_SHARED.sql` once. Existing projects: apply
-`backend/005_temporary_relay.sql` after 001–004, then `006_mobile_browsing.sql`. This blocks desktop uploads on the server,
+New projects: run the bundled [SETUP_SHARED.sql](SETUP_SHARED.sql) once. Existing projects: apply
+`backend/005_temporary_relay.sql` after 001–004, then `006_mobile_browsing.sql` from the separate Android project. This blocks desktop uploads on the server,
 retains owner-only RLS, and adds the consume endpoint. It does not erase any existing data by itself.
 Existing cloud rows are consumed by the PC only after local persistence and verification.
 
