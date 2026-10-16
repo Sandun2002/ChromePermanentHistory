@@ -1,0 +1,30 @@
+# Runtime data and private installation state must never enter source control.
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.csv
+*.log
+*.log.*
+*.dpapi
+*.dpapi.*
+.cloud-sync-*
+.collector-*
+nsfw_rules.json
+PROJECT_CONNECTION.json
+
+# Historical imports contain actual browsing observations, including inline data.
+manual_import_20261014_15.py
+manual-import-*/
+account-backup-*/
+code-backup-*/
+backups/
+
+# Regenerable caches and temporary files.
+__pycache__/
+*.py[cod]
+thumbnail_cache/
+*.tmp
+
+# Account setup screenshots are private installation artifacts.
+/*.png
