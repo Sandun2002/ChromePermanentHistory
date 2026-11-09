@@ -29,7 +29,8 @@ folder. Windows Task Scheduler was unavailable to this user during setup.
 
 ## Analytics dashboard
 
-Double-click open_dashboard.cmd. It opens the private dashboard at
+Double-click open_dashboard.cmd. It opens Chrome using its last-used profile,
+without forcing Profile 13, and loads the private dashboard at
 http://127.0.0.1:8765. It offers date filtering, title or URL search, visit
 totals, daily activity, top websites, detected search-query analysis,
 time-of-day and weekday patterns, a paginated visit list, and a filtered CSV
@@ -102,6 +103,19 @@ Follow [the current setup guide](docs/SHARED_SYNC_SETUP.md). New-project SQL is
 notes are retained in [PROJECT_STATUS.md](docs/PROJECT_STATUS.md); its older
 sections describe historical states, not current runtime health.
 
+## Separate Mobile view
+
+Use the **Combined**, **Desktop archive**, and **Mobile** buttons above the filters.
+Mobile shows original DataSync captures received by the PC; it never substitutes a
+desktop record through duplicate grouping. Charts, sessions, search, and CSV exports
+follow the selected view. Possible matches remain labelled for review, and all records
+are retained. Desktop archive can include phone visits delivered through Chrome sync;
+the source identifies the collection path, not proof of the browsing device.
+
+Open `http://127.0.0.1:8765/?view=mobile` to go directly to Mobile.
+Combined retains optional likely-duplicate grouping. The separate source views always
+show original observations, so their totals should not be added as a unique-visit count.
+
 ## Folder layout
 
 The four active Python modules and Windows launchers stay here beside the live
@@ -109,3 +123,23 @@ data. Supporting guides and SQL are grouped in docs/. Databases, credentials,
 exports, logs, and caches are excluded from Git. Completed one-time tools and old
 backup folders were archived outside the project; see the
 [workspace cleanup record](../README.md#workspace-cleanup--2026-10-17).
+
+## Deleting archived searches
+
+The Delete button beside a query in Most searched queries deletes all locally
+archived observations of that exact query, across desktop and mobile and all
+dates, regardless of the current filters. The managed desktop CSV is refreshed.
+Restart the dashboard, collector, and any running relay daemon after updating before using
+this feature. Hashes of deleted observation identifiers are retained to prevent
+the collector or relay from re-importing those observations; future searches for
+the same term can still be collected.
+
+This does not erase Chrome or Google account history, other devices, cloud copies,
+previous exports, backups, or thumbnails. SQLite journals and storage media may
+retain recoverable data, so deletion cannot guarantee removal without a trace.
+
+
+In Archived visits, check individual rows or use Select page, then choose Delete
+selected. Selection applies to the current page. A grouped row deletes both
+underlying observations; switch to a separate source view to select one. The
+same limitations and restart requirements above apply.

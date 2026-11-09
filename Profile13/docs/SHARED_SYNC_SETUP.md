@@ -94,9 +94,12 @@ heuristic, not proof or permission to erase raw records.
 
 Choose **Duplicate observations → Show all original observations** to inspect/export both records.
 Grouped rows are labelled **Profile 13 + Android · likely duplicate grouped**; their desktop URL
-and timestamp are representative. Grouped observations appear under both desktop and Android
-source filters. Charts, counts, sessions and CSV exports use the selected duplicate view; CSV
-includes duplicate status and observation count. All original rows remain in the two local databases.
+and timestamp are representative. Combined can group likely duplicate observations. The separate Desktop archive and Mobile
+views always show their own original observations, including possible matches, with no cross-source
+substitution. Mobile includes DataSync records only; Desktop archive may also contain phone visits
+received through Chrome sync. Charts, counts, sessions and CSV exports follow the selected view;
+CSV includes duplicate status and observation count. Open `http://127.0.0.1:8765/?view=mobile`
+to inspect Mobile directly. Do not add separate-view totals as a unique-visit count. All original rows remain in the two local databases.
 Future mobile imports are evaluated automatically. Relay deletion still follows durable saving,
 independently of whether a possible duplicate is grouped.
 

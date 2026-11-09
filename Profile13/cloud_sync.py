@@ -143,6 +143,7 @@ class Bridge:
         self.stop = threading.Event()
         with self.db() as db:
             db.executescript('''
+                CREATE TABLE IF NOT EXISTS deleted_remote_hashes(digest TEXT PRIMARY KEY);
                 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS outbox(kind TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,
                     synced INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(kind,id));
@@ -320,6 +321,8 @@ class Bridge:
                     raise SyncError('Invalid mobile browsing metadata; cloud copy retained')
                 keys += ('observed_url','url_quality','title_source','tab_mode','capture_version')
         payload = json.dumps({key: record[key] for key in keys}, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha256(json.dumps([kind, record['id']], ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        if db.execute('SELECT 1 FROM deleted_remote_hashes WHERE digest=?', (digest,)).fetchone(): return
         existing = db.execute('SELECT payload FROM remote WHERE kind=? AND id=?', (kind, record['id'])).fetchone()
         if existing and existing[0] != payload: raise SyncError('Conflicting immutable cloud record; existing copy retained')
         delta = datetime.fromisoformat(at) - EPOCH
@@ -377,6 +380,8 @@ class Bridge:
         # Read the committed copy back from a separate connection, including every payload field.
         with self.db() as db:
             for record in page:
+                digest = hashlib.sha256(json.dumps([kind, record['id']], ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+                if db.execute('SELECT 1 FROM deleted_remote_hashes WHERE digest=?', (digest,)).fetchone(): continue
                 saved = db.execute('SELECT payload FROM remote WHERE kind=? AND id=?', (kind,record['id'])).fetchone()
                 if not saved or any(record.get(k) != v for k,v in json.loads(saved[0]).items()):
                     raise SyncError('Local verification failed; cloud copy retained')

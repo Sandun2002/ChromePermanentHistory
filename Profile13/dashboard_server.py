@@ -2,8 +2,7 @@
 """
 Private local analytics dashboard for the permanent Chrome history archive.
 
-The server binds only to 127.0.0.1. It reads the archive in SQLite read-only
-mode and does not send browsing data anywhere or modify archive records.
+The server binds only to 127.0.0.1. Archive deletion is available from the dashboard.
 """
 
 from __future__ import annotations
@@ -836,6 +835,7 @@ DASHBOARD_HTML = """<!doctype html>
     .visit-media img { width:100%; height:100%; object-fit:cover; opacity:0; }
     .visit-media.ready img { opacity:1; }
     .visit-media.ready::after { content:'Preview'; position:absolute; right:5px; bottom:4px; padding:2px 4px; border-radius:4px; color:#fff; background:rgba(0,0,0,.62); font-size:9px; }
+    .visit-select { width:18px; height:18px; margin:8px 0; cursor:pointer; }
     .visit-card-actions { display:flex; gap:6px; align-items:center; }
     .visit-card-actions .visit-preview { margin-top:0; }
     .hour-value, .bar, .fill { background: var(--accent); }
@@ -940,7 +940,7 @@ DASHBOARD_HTML = """<!doctype html>
         <button type="button" class="ghost cloud-action" id="sync-now">Sync now</button>
         <button type="button" class="ghost cloud-action" id="sync-signout">Sign out</button>
       </div>
-      <p class="hint">Profile 13 may already contain Chrome-synced mobile visits. Source labels distinguish capture paths; repeated observations are retained rather than merged by approximate query/time.</p>
+      <p class="hint">Profile 13 may already contain Chrome-synced mobile visits. Source labels identify how records were captured. Use Mobile to inspect original DataSync records separately; Combined can group likely duplicate observations without deleting them.</p>
     </details>
     <section class="filter-stage">
       <div class="filter-intro">
@@ -955,11 +955,17 @@ DASHBOARD_HTML = """<!doctype html>
           <button type="button" data-period-mode="custom">Custom</button>
         </div>
       </div>
+      <div class="period-tabs" role="group" aria-label="Archive view" style="margin:0 0 16px">
+        <button type="button" data-archive-view="all" class="active" aria-pressed="true">Combined</button>
+        <button type="button" data-archive-view="desktop" aria-pressed="false">Desktop archive</button>
+        <button type="button" data-archive-view="android" aria-pressed="false">Mobile</button>
+      </div>
+      <p class="hint" id="archive-view-note" aria-live="polite"></p>
       <form class="filters" id="filters">
         <label>Search title, website, or link
           <input id="search" type="search" placeholder="youtube, news, banking">
         </label>
-        <label>Capture source<select id="device-source"><option value="all">All sources</option><option value="desktop">Profile 13 / desktop archive</option><option value="android">Android browsing capture</option></select></label>
+        <label>Archive view<select id="device-source"><option value="all">Combined</option><option value="desktop">Desktop archive</option><option value="android">Mobile / DataSync</option></select></label>
         <label>Duplicate observations<select id="duplicate-view"><option value="group">Group unique likely matches</option><option value="all">Show all original observations</option></select></label>
         <p class="hint" id="duplicate-summary">Matching uses full URLs where available, or legacy engine/query pairs, within 2 seconds. Original records are always retained.</p>
         <div class="picker-field period-picker" id="month-period-field" hidden>
@@ -1186,6 +1192,8 @@ DASHBOARD_HTML = """<!doctype html>
       <div class="table-head">
         <div><h2>Archived visits</h2><p id="table-caption">Newest first · open a page or load image previews on demand</p><p class="hint" id="preview-status" hidden></p></div>
         <div class="actions">
+          <button type="button" class="ghost" id="select-visits">Select page</button>
+          <button type="button" class="ghost" id="delete-visits" disabled>Delete selected (0)</button>
           <button type="button" class="ghost" id="load-previews" aria-pressed="false">Load image previews</button>
           <button type="button" class="ghost" id="export">Export CSV</button>
           <button type="button" class="ghost" id="refresh">Refresh</button>
@@ -1443,9 +1451,24 @@ DASHBOARD_HTML = """<!doctype html>
         return;
       }
       target.innerHTML = items.map((item) => {
-        return '<div class="query-row"><a class="query-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="Open this saved search"><div><b title="' + escapeHtml(item.query) + '">' + escapeHtml(item.query) + '</b><small title="' + escapeHtml(item.websites) + '">' + escapeHtml(item.websites) + '</small></div><span>' + item.count + '</span></a></div>';
+        if (targetId !== "queries") return '<div class="query-row"><a class="query-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener"><div><b>' + escapeHtml(item.query) + '</b><small>' + escapeHtml(item.websites) + '</small></div><span>' + item.count + '</span></a></div>';
+        return '<div class="query-row"><button type="button" class="ghost delete-query" data-query="' + escapeHtml(item.query) + '" style="float:right;margin:4px">Delete</button><a class="query-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="Open this saved search"><div><b title="' + escapeHtml(item.query) + '">' + escapeHtml(item.query) + '</b><small title="' + escapeHtml(item.websites) + '">' + escapeHtml(item.websites) + '</small></div><span>' + item.count + '</span></a></div>';
       }).join("");
     };
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest(".delete-query");
+      if (!button) return;
+      const query = button.dataset.query;
+      if (!confirm('Delete all archived searches for “' + query + '” across desktop and mobile, regardless of filters? Chrome, cloud, backups and previously exported files may still contain copies.')) return;
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/delete-search', {method:'POST', headers:{'Content-Type':'application/json', 'X-DataSync':'1'}, body:JSON.stringify({query})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Deletion failed');
+        alert(result.message);
+        load();
+      } catch (error) { alert(error.message); button.disabled = false; }
+    });
     const displayHours = (items) => {
       const target = el("hours");
       const maximum = Math.max(...items.map((item) => item.value), 1);
@@ -1554,21 +1577,37 @@ DASHBOARD_HTML = """<!doctype html>
       const observer = new IntersectionObserver((entries) => { entries.forEach((entry) => { if (!entry.isIntersecting) return; observer.unobserve(entry.target); showThumbnail(entry.target); }); }, {rootMargin:"180px"});
       images.forEach((image) => observer.observe(image));
     };
+    let visitItems = [];
+    const selectedVisits = new Set();
+    const visitKey = item => String(item.archive_id) + ":" + item.delete_refs.map(ref => ref.digest).join(":");
+    const updateVisitSelection = () => {
+      const boxes = [...document.querySelectorAll('.visit-select')];
+      el('delete-visits').disabled = selectedVisits.size === 0;
+      el('delete-visits').textContent = 'Delete selected (' + selectedVisits.size + ')';
+      el('select-visits').textContent = boxes.length && boxes.every(box => box.checked) ? 'Clear page' : 'Select page';
+    };
     const displayVisits = (items) => {
+      visitItems = items;
+      const visible = new Set(items.map(visitKey));
+      for (const id of selectedVisits) if (!visible.has(id)) selectedVisits.delete(id);
       const target = el("visit-rows");
       if (!items.length) {
-        target.innerHTML = '<div class="empty">No matching archived visits.</div>';
+        target.innerHTML = el('device-source').value === 'android'
+          ? '<div class="empty">No mobile records in this range. Mobile shows only DataSync captures received by this PC; phone visits received through Chrome sync remain in Desktop archive.</div>'
+          : '<div class="empty">No matching archived visits.</div>';
+        updateVisitSelection();
         return;
       }
       target.innerHTML = items.map((item) => {
         const title = item.title || "Untitled page";
         const mobile = (item.capture_source || '').startsWith('chrome_android');
         const manual = item.capture_source === 'manual_import';
-        const quality = manual ? ' · time supplied to the minute' + (item.url_quality === 'incomplete' ? ' · incomplete URL' : '') : mobile && ['address_bar','inferred_scheme'].includes(item.url_quality) ? ' · address-bar fallback (may be incomplete)' : mobile && item.url_quality === 'document' ? ' · document URL' : '';
+        const quality = manual ? (item.url_quality === 'user_supplied_precise' ? ' · imported visit timestamp' : ' · time supplied to the minute') + (item.url_quality === 'incomplete' ? ' · incomplete URL' : '') : mobile && ['address_bar','inferred_scheme'].includes(item.url_quality) ? ' · address-bar fallback (may be incomplete)' : mobile && item.url_quality === 'document' ? ' · document URL' : '';
         const sourceLabel = (item.duplicate_status === 'grouped' ? 'Profile 13 + Android · likely duplicate grouped' : (manual ? 'Manually supplied record' : mobile ? 'Android browsing capture' : 'Profile 13 archive') + (item.duplicate_status === 'possible' ? ' · possible duplicate' : '')) + quality + (item.tab_mode === 'incognito' ? ' · Incognito' : '');
         const media = state.previews ? '<div class="visit-media"><img alt="" data-thumbnail-url="' + escapeHtml(item.url) + '"></div>' : '';
-        return '<article class="visit-card"><div class="visit-favicon" aria-hidden="true">' + escapeHtml(faviconLetter(item.domain)) + '</div><div class="visit-card-body"><span class="visit-source">' + escapeHtml(sourceLabel + " · " + visitLabel(item.url, item.domain)) + '</span><a class="visit-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="Open this archived visit in a new tab"><span class="visit-title" title="' + escapeHtml(title) + '">' + escapeHtml(title) + '</span><span class="visit-url" title="' + escapeHtml(item.url) + '">' + escapeHtml(item.url) + '</span></a><div class="visit-meta"><time>' + escapeHtml(localDate(item.visited_at_utc, false)) + '</time><span>·</span><span>' + escapeHtml(item.domain || "Archived visit") + '</span></div></div><div class="visit-card-actions"><button type="button" class="visit-preview" data-preview-url="' + escapeHtml(item.url) + '" aria-label="Open a compact preview for ' + escapeHtml(title) + '" title="Open compact preview">◫</button></div>' + media + '</article>';
+        return '<article class="visit-card"><div class="visit-favicon" aria-hidden="true">' + escapeHtml(faviconLetter(item.domain)) + '</div><div class="visit-card-body"><span class="visit-source">' + escapeHtml(sourceLabel + " · " + visitLabel(item.url, item.domain)) + '</span><a class="visit-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="Open this archived visit in a new tab"><span class="visit-title" title="' + escapeHtml(title) + '">' + escapeHtml(title) + '</span><span class="visit-url" title="' + escapeHtml(item.url) + '">' + escapeHtml(item.url) + '</span></a><div class="visit-meta"><time>' + escapeHtml(localDate(item.visited_at_utc, false)) + '</time><span>·</span><span>' + escapeHtml(item.domain || "Archived visit") + '</span></div></div><div class="visit-card-actions"><input class="visit-select" type="checkbox" data-visit-id="' + visitKey(item) + '" aria-label="Select visit" ' + (selectedVisits.has(visitKey(item)) ? 'checked' : '') + '><button type="button" class="visit-preview" data-preview-url="' + escapeHtml(item.url) + '" aria-label="Open a compact preview for ' + escapeHtml(title) + '" title="Open compact preview">◫</button></div>' + media + '</article>';
       }).join("");
+      updateVisitSelection();
       if (state.previews) { state.previewChecked = 0; state.previewFound = 0; updatePreviewStatus(); loadVisibleThumbnails(); }
     };
     let syncSettingsLoaded = false;
@@ -1730,7 +1769,7 @@ DASHBOARD_HTML = """<!doctype html>
     const applyData = (data) => {
       applyCollectorStatus(data.collector_status);
       el("visit-count").textContent = data.summary.visits.toLocaleString();
-      el('duplicate-summary').textContent = (data.summary.grouped_observations || 0) + ' likely duplicate pairs grouped in this range; ' + (data.summary.flagged_observations || 0) + ' observations flagged. Full URLs or legacy engine/query within 2 seconds; ambiguous matches, explicit shares and known Incognito stay separate. Original records are retained. Choose all observations to review/export both sources.';
+      el('duplicate-summary').textContent = el('device-source').value !== 'all' ? 'All original records from this capture source are shown. Possible duplicate labels are review hints; no records are merged or deleted in this view.' : (data.summary.grouped_observations || 0) + ' likely duplicate pairs grouped in this range; ' + (data.summary.flagged_observations || 0) + ' observations flagged. Full URLs or legacy engine/query within 2 seconds; ambiguous matches, explicit shares and known Incognito stay separate. Original records are retained. Choose all observations to review/export both sources.';
       el("domain-count").textContent = data.summary.domains.toLocaleString();
       el("first-visit").textContent = localDate(data.summary.first_visit, true);
       el("last-visit").textContent = localDate(data.summary.last_visit, true);
@@ -1790,13 +1829,17 @@ DASHBOARD_HTML = """<!doctype html>
       syncNoiseToggle();
       el("status").textContent = "Archive loaded locally · updated " + new Intl.DateTimeFormat("en-LK", { timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
     };
+    let loadSequence = 0;
     async function load() {
+      const sequence = ++loadSequence;
       el("status").textContent = "Loading private archive...";
       try {
         const response = await fetch("/api/dashboard?" + parameters().toString(), { cache: "no-store" });
         if (!response.ok) throw new Error("The archive could not be read.");
-        applyData(await response.json());
+        const data = await response.json();
+        if (sequence === loadSequence) applyData(data);
       } catch (error) {
+        if (sequence !== loadSequence) return;
         el("status").textContent = "Could not load the archive. Keep the collector files in their current folder.";
       }
     }
@@ -1834,6 +1877,29 @@ DASHBOARD_HTML = """<!doctype html>
       state.hideNoise = !state.hideNoise;
       state.page = 1;
       load();
+    });
+    el('visit-rows').addEventListener('change', (event) => {
+      if (!event.target.matches('.visit-select')) return;
+      const id = event.target.dataset.visitId;
+      if (event.target.checked) selectedVisits.add(id); else selectedVisits.delete(id);
+      updateVisitSelection();
+    });
+    el('select-visits').addEventListener('click', () => {
+      const boxes = [...document.querySelectorAll('.visit-select')];
+      const select = !boxes.every(box => box.checked);
+      boxes.forEach(box => { box.checked = select; if (select) selectedVisits.add(box.dataset.visitId); else selectedVisits.delete(box.dataset.visitId); });
+      updateVisitSelection();
+    });
+    el('delete-visits').addEventListener('click', async () => {
+      const chosen = visitItems.filter(item => selectedVisits.has(visitKey(item)));
+      if (!chosen.length || !confirm('Delete ' + chosen.length + ' selected visit(s) from the local archives? Grouped rows delete both observations. Chrome, other devices, cloud copies, backups and exports may still contain copies.')) return;
+      el('delete-visits').disabled = true;
+      try {
+        const response = await fetch('/api/delete-visits', {method:'POST', headers:{'Content-Type':'application/json','X-DataSync':'1'}, body:JSON.stringify({visits:chosen.flatMap(item => item.delete_refs)})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Deletion failed');
+        selectedVisits.clear(); alert(result.message); await load();
+      } catch (error) { alert(error.message); updateVisitSelection(); }
     });
     el("visit-rows").addEventListener("click", (event) => {
       const preview = event.target.closest(".visit-preview");
@@ -1931,13 +1997,42 @@ DASHBOARD_HTML = """<!doctype html>
     el("save-nsfw-rules").addEventListener("click", saveNsfwRules);
     el("previous").addEventListener("click", () => { if (state.page > 1) { state.page -= 1; load(); } });
     el("next").addEventListener("click", () => { state.page += 1; load(); });
-    el('device-source').addEventListener('change', () => { state.page = 1; load(); });
+    let combinedDuplicateView = el('duplicate-view').value;
+    const selectArchiveView = (source, reload = true) => {
+      if (!['all', 'desktop', 'android'].includes(source)) source = 'all';
+      if (!el('duplicate-view').disabled) combinedDuplicateView = el('duplicate-view').value;
+      el('device-source').value = source;
+      el('duplicate-view').disabled = source !== 'all';
+      el('duplicate-view').value = source === 'all' ? combinedDuplicateView : 'all';
+      document.querySelectorAll('[data-archive-view]').forEach((button) => {
+        const selected = button.dataset.archiveView === source;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+      el('archive-view-note').textContent = source === 'android'
+        ? 'Mobile shows original DataSync phone records only. All charts and exports follow this view. A possible match in Desktop archive does not hide the mobile record.'
+        : source === 'desktop'
+        ? 'Desktop archive shows Profile 13 records, including any phone visits delivered by Chrome sync. It identifies the collection path, not necessarily the device used to browse.'
+        : 'Combined includes both capture paths. Likely duplicate grouping is optional; the separate views always show original records.';
+      const address = new URL(window.location.href);
+      if (source === 'all') address.searchParams.delete('view');
+      else address.searchParams.set('view', source === 'android' ? 'mobile' : 'desktop');
+      history.replaceState(null, '', address);
+      state.page = 1;
+      if (reload) load();
+    };
+    document.querySelectorAll('[data-archive-view]').forEach((button) => {
+      button.addEventListener('click', () => selectArchiveView(button.dataset.archiveView));
+    });
+    el('device-source').addEventListener('change', () => selectArchiveView(el('device-source').value));
     el('duplicate-view').addEventListener('change', () => { state.page = 1; load(); });
     el('sync-save').addEventListener('click', () => cloudAction('configure', {url:el('sync-project').value, key:el('sync-key').value, include_visits:el('sync-full-history').checked}));
     el('sync-login').addEventListener('click', () => cloudAction('login'));
     el('sync-now').addEventListener('click', () => cloudAction('now'));
     el('sync-signout').addEventListener('click', () => cloudAction('signout'));
     try { applyTheme(localStorage.getItem("history-dashboard-theme") || "white"); } catch (error) { applyTheme("white"); }
+    const initialView = new URLSearchParams(window.location.search).get('view');
+    selectArchiveView(initialView === 'mobile' ? 'android' : initialView === 'desktop' ? 'desktop' : 'all', false);
     syncDatePicker();
     syncTimePicker();
     updateMinuteAvailability();
@@ -1968,9 +2063,9 @@ def _archive_connection(duplicates='group') -> sqlite3.Connection:
         timeout=10,
     )
     connection.row_factory = sqlite3.Row
-    connection.execute('CREATE TEMP TABLE manual_visit_provenance(archive_id INTEGER PRIMARY KEY, url_incomplete INTEGER)')
+    connection.execute('CREATE TEMP TABLE manual_visit_provenance(archive_id INTEGER PRIMARY KEY, url_incomplete INTEGER, timestamp_precision TEXT)')
     if connection.execute("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='manual_visit_provenance'").fetchone():
-        connection.execute('INSERT INTO temp.manual_visit_provenance SELECT archive_id,url_incomplete FROM main.manual_visit_provenance')
+        connection.execute('INSERT INTO temp.manual_visit_provenance SELECT archive_id,url_incomplete,timestamp_precision FROM main.manual_visit_provenance')
     connection.execute('CREATE TEMP TABLE duplicate_candidates(desktop_id INTEGER,mobile_id INTEGER,delta_us INTEGER,groupable INTEGER)')
     connection.execute('CREATE INDEX temp.duplicate_desktop ON duplicate_candidates(desktop_id)')
     connection.execute('CREATE INDEX temp.duplicate_mobile ON duplicate_candidates(mobile_id)')
@@ -2001,7 +2096,7 @@ def _archive_connection(duplicates='group') -> sqlite3.Connection:
     connection.execute("""CREATE TEMP VIEW archive_observations AS SELECT p.*,
         CASE WHEN m.archive_id IS NOT NULL THEN 'manual_import' ELSE 'chrome_profile13' END AS capture_source,
         p.url AS observed_url,
-        CASE WHEN m.url_incomplete=1 THEN 'incomplete' WHEN m.archive_id IS NOT NULL THEN 'user_supplied' ELSE 'desktop_history' END AS url_quality,
+        CASE WHEN m.url_incomplete=1 THEN 'incomplete' WHEN m.timestamp_precision='microsecond' THEN 'user_supplied_precise' WHEN m.archive_id IS NOT NULL THEN 'user_supplied' ELSE 'desktop_history' END AS url_quality,
         CASE WHEN m.archive_id IS NOT NULL THEN 'user_supplied' ELSE 'chrome_history' END AS title_source,
         'unknown' AS tab_mode FROM main.permanent_visits p LEFT JOIN temp.manual_visit_provenance m ON m.archive_id=p.archive_id""" + union)
     grouped = 1 if duplicates!='all' else 0
@@ -2026,7 +2121,9 @@ def _archive_connection(duplicates='group') -> sqlite3.Connection:
 
 @contextmanager
 def open_archive(filters=None):
-    with closing(_archive_connection((filters or {}).get('duplicates','group'))) as connection:
+    filters = filters or {}
+    duplicates = 'all' if filters.get('source') in ('android', 'desktop') else filters.get('duplicates', 'group')
+    with closing(_archive_connection(duplicates)) as connection:
         yield connection
 
 
@@ -2092,7 +2189,7 @@ def filters_from_query(values: dict[str, list[str]]) -> dict[str, Any]:
         "hour_scope": hour_scope,
         "hide_noise": hide_noise,
         "source": first_value(values, 'source') if first_value(values, 'source') in ('desktop','android') else 'all',
-        "duplicates": 'all' if first_value(values,'duplicates')=='all' else 'group',
+        "duplicates": 'all' if first_value(values, 'source') in ('desktop', 'android') or first_value(values,'duplicates')=='all' else 'group',
         "page": page,
         "limit": limit,
     }
@@ -3319,7 +3416,7 @@ def dashboard_data(filters: dict[str, Any]) -> dict[str, Any]:
         offset = (page - 1) * filters["limit"]
         visits = connection.execute(
             """
-            SELECT visited_at_utc, title, url, domain, capture_source, duplicate_status, observation_count, observed_url, url_quality, title_source, tab_mode
+            SELECT archive_id, visited_at_utc, title, url, domain, capture_source, duplicate_status, observation_count, observed_url, url_quality, title_source, tab_mode
             FROM permanent_visits
             """
             + where
@@ -3330,6 +3427,22 @@ def dashboard_data(filters: dict[str, Any]) -> dict[str, Any]:
             [*parameters, filters["limit"], offset],
         ).fetchall()
 
+        visit_items = []
+        for row in visits:
+            item = dict(row)
+            ids = [row['archive_id']]
+            if row['duplicate_status'] == 'grouped':
+                ids += [-r[0] for r in connection.execute('SELECT mobile_id FROM duplicate_candidates WHERE desktop_id=? AND groupable=1 ORDER BY mobile_id', (row['archive_id'],))]
+            item['delete_refs'] = []
+            for visit_id in ids:
+                if visit_id > 0:
+                    original = connection.execute('SELECT url,chrome_visit_time,transition FROM main.permanent_visits WHERE archive_id=?', (visit_id,)).fetchone()
+                    ref = [original[0], original[1], original[2]]
+                else:
+                    original = connection.execute('SELECT kind,id FROM shared.remote WHERE rowid=?', (-visit_id,)).fetchone()
+                    ref = [original[0], original[1]]
+                item['delete_refs'].append({'id': visit_id, 'digest': deletion_digest(ref)})
+            visit_items.append(item)
         trend = trend_data(connection, where, parameters, filters)
         searches = search_analytics(connection, where, parameters)
         nsfw = nsfw_analytics(connection, where, parameters)
@@ -3356,7 +3469,7 @@ def dashboard_data(filters: dict[str, Any]) -> dict[str, Any]:
         "collector_status": collector,
         "top_domains": [{"domain": row["domain"], "count": row["count"]} for row in domains],
         "visits": {
-            "items": [dict(row) for row in visits],
+            "items": visit_items,
             "total": total,
             "page": page,
             "pages": pages,
@@ -3377,7 +3490,7 @@ def session_activity(query: dict[str, list[str]]) -> dict[str, Any]:
     end_utc = end.astimezone(timezone.utc).isoformat()
     source = first_value(query,'source')
     source_where = " AND capture_source IN ('chrome_android','chrome_android_share','chrome_profile13+chrome_android')" if source == 'android' else " AND capture_source IN ('chrome_profile13','chrome_profile13+chrome_android')" if source == 'desktop' else ''
-    with open_archive({'duplicates':first_value(query,'duplicates')}) as connection:
+    with open_archive({'source': source, 'duplicates':first_value(query,'duplicates')}) as connection:
         rows = connection.execute(
             """
             SELECT visited_at_utc, title, url, domain, visit_duration
@@ -3601,6 +3714,92 @@ def cached_thumbnail_file(key: str) -> tuple[Path, str] | None:
     return None
 
 
+def deletion_digest(value: list[Any]) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+
+
+def delete_visits(refs: Any) -> dict[str, Any]:
+    if not isinstance(refs, list) or not 1 <= len(refs) <= 1000:
+        raise ValueError('Select between 1 and 1000 observations.')
+    if any(not isinstance(r, dict) or type(r.get('id')) is not int or r['id'] == 0 or not isinstance(r.get('digest'), str) or not re.fullmatch(r'[a-f0-9]{64}', r['digest']) for r in refs):
+        raise ValueError('Invalid visit selection.')
+    unique = {r['id']: r['digest'] for r in refs}
+    if len(unique) != len(refs):
+        raise ValueError('Duplicate visit selection. Refresh and try again.')
+    cloud = ARCHIVE_DIRECTORY / 'SharedArchive.sqlite'
+    with closing(sqlite3.connect(ARCHIVE_DATABASE, timeout=30)) as db:
+        db.execute('PRAGMA secure_delete=ON')
+        if cloud.is_file():
+            db.execute('ATTACH DATABASE ? AS shared', (str(cloud),))
+            db.execute('PRAGMA shared.secure_delete=ON')
+        db.execute('BEGIN IMMEDIATE')
+        desktop, remote = [], []
+        for visit_id, expected in unique.items():
+            if visit_id > 0:
+                row = db.execute('SELECT url,chrome_visit_time,transition FROM main.permanent_visits WHERE archive_id=?', (visit_id,)).fetchone()
+                if not row or deletion_digest(list(row)) != expected: raise ValueError('A selected visit changed. Refresh and try again.')
+                desktop.append((visit_id, expected))
+            else:
+                if not cloud.is_file(): raise ValueError('Mobile archive unavailable. Refresh and try again.')
+                row = db.execute('SELECT kind,id FROM shared.remote WHERE rowid=?', (-visit_id,)).fetchone()
+                if not row or deletion_digest(list(row)) != expected: raise ValueError('A selected visit changed. Refresh and try again.')
+                remote.append((-visit_id, expected))
+        db.execute('CREATE TABLE IF NOT EXISTS deleted_visit_hashes(digest TEXT PRIMARY KEY)')
+        db.executemany('INSERT OR IGNORE INTO deleted_visit_hashes VALUES (?)', [(r[1],) for r in desktop])
+        db.execute('DROP TRIGGER IF EXISTS permanent_visits_no_delete')
+        if db.execute("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='manual_visit_provenance'").fetchone():
+            db.executemany('DELETE FROM manual_visit_provenance WHERE archive_id=?', [(r[0],) for r in desktop])
+        db.executemany('DELETE FROM main.permanent_visits WHERE archive_id=?', [(r[0],) for r in desktop])
+        db.execute("CREATE TRIGGER permanent_visits_no_delete BEFORE DELETE ON permanent_visits BEGIN SELECT RAISE(ABORT, 'permanent_visits is append-only'); END")
+        if remote:
+            db.execute('CREATE TABLE IF NOT EXISTS shared.deleted_remote_hashes(digest TEXT PRIMARY KEY)')
+            db.executemany('INSERT OR IGNORE INTO shared.deleted_remote_hashes VALUES (?)', [(r[1],) for r in remote])
+            db.executemany('DELETE FROM shared.remote WHERE rowid=?', [(r[0],) for r in remote])
+        db.commit()
+    try:
+        from history_collector import export_csv
+        with closing(sqlite3.connect(ARCHIVE_DATABASE, timeout=30)) as db: export_csv(db)
+    except (OSError, sqlite3.Error) as error:
+        return {'message': f'Deleted {len(desktop)} desktop and {len(remote)} mobile records, but the managed CSV could not be refreshed: {error}. Refresh it before relying on deletion.'}
+    return {'message': f'Deleted {len(desktop)} desktop and {len(remote)} mobile archive records. Other copies may remain.'}
+
+
+def delete_search(query: str) -> dict[str, Any]:
+    """Delete exact matching search observations from the two local archives."""
+    if not isinstance(query, str) or not 2 <= len(query) <= 200:
+        raise ValueError("Invalid search query.")
+    wanted = query.casefold()
+    cloud = ARCHIVE_DIRECTORY / 'SharedArchive.sqlite'
+    with closing(sqlite3.connect(ARCHIVE_DATABASE, timeout=30)) as db:
+        db.execute('PRAGMA secure_delete=ON')
+        if cloud.is_file():
+            db.execute('ATTACH DATABASE ? AS shared', (str(cloud),))
+            db.execute('PRAGMA shared.secure_delete=ON')
+        db.execute('BEGIN IMMEDIATE')
+        db.execute('CREATE TABLE IF NOT EXISTS deleted_visit_hashes(digest TEXT PRIMARY KEY)')
+        rows = db.execute('SELECT archive_id,url,chrome_visit_time,transition FROM main.permanent_visits').fetchall()
+        matches = [row for row in rows if (found := extract_search_query(row[1])) and found[0].casefold() == wanted]
+        digest = lambda value: hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        db.executemany('INSERT OR IGNORE INTO deleted_visit_hashes VALUES (?)', [(digest([r[1], r[2], r[3]]),) for r in matches])
+        db.execute('DROP TRIGGER IF EXISTS permanent_visits_no_delete')
+        if db.execute("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='manual_visit_provenance'").fetchone():
+            db.executemany('DELETE FROM manual_visit_provenance WHERE archive_id=?', [(r[0],) for r in matches])
+        db.executemany('DELETE FROM main.permanent_visits WHERE archive_id=?', [(r[0],) for r in matches])
+        db.execute("CREATE TRIGGER permanent_visits_no_delete BEFORE DELETE ON permanent_visits BEGIN SELECT RAISE(ABORT, 'permanent_visits is append-only'); END")
+        remote = []
+        if cloud.is_file() and db.execute("SELECT 1 FROM shared.sqlite_master WHERE type='table' AND name='remote'").fetchone():
+            db.execute('CREATE TABLE IF NOT EXISTS shared.deleted_remote_hashes(digest TEXT PRIMARY KEY)')
+            remote = [r for r in db.execute('SELECT kind,id,url FROM shared.remote') if (found := extract_search_query(r[2])) and found[0].casefold() == wanted]
+            db.executemany('INSERT OR IGNORE INTO shared.deleted_remote_hashes VALUES (?)', [(digest([r[0],r[1]]),) for r in remote])
+            db.executemany('DELETE FROM shared.remote WHERE kind=? AND id=?', [(r[0],r[1]) for r in remote])
+        db.commit()
+    # Refresh the managed export after committing; an error must be reported to the user.
+    from history_collector import export_csv
+    with closing(sqlite3.connect(ARCHIVE_DATABASE, timeout=30)) as db:
+        export_csv(db)
+    return {'message': f'Deleted {len(matches)} desktop and {len(remote)} mobile archive records. Other copies may remain.'}
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "PrivateHistoryDashboard/1.0"
 
@@ -3688,6 +3887,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self.local_request(): return
         request = urlparse(self.path)
+        if request.path in ('/api/delete-search', '/api/delete-visits'):
+            try:
+                allowed = {f'http://127.0.0.1:{self.server.server_port}', f'http://localhost:{self.server.server_port}'}
+                if self.headers.get('Origin', '') not in allowed or self.headers.get('X-DataSync') != '1':
+                    self.send_json({'error': 'Cross-site deletion blocked'}, HTTPStatus.FORBIDDEN); return
+                if not self.headers.get('Content-Type', '').lower().startswith('application/json'): raise ValueError('JSON required')
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 1 <= length <= 150000: raise ValueError('Invalid request size')
+                payload = json.loads(self.rfile.read(length))
+                self.send_json(delete_search(payload.get('query')) if request.path == '/api/delete-search' else delete_visits(payload.get('visits')))
+            except (OSError, sqlite3.Error, ValueError, TypeError) as error:
+                self.send_json({'error': str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         if request.path.startswith('/api/sync/'):
             try:
                 allowed = {f'http://127.0.0.1:{self.server.server_port}', f'http://localhost:{self.server.server_port}'}

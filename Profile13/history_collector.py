@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import json
 import ctypes
 import logging
 import os
@@ -350,7 +352,11 @@ def archive_rows(
     archived_at = utc_now_iso()
     inserted = 0
 
+    archive_connection.execute("CREATE TABLE IF NOT EXISTS deleted_visit_hashes (digest TEXT PRIMARY KEY)")
     for row in cursor:
+        digest = hashlib.sha256(json.dumps([row["url"], row["visit_time"], row["transition"]], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        if archive_connection.execute("SELECT 1 FROM deleted_visit_hashes WHERE digest=?", (digest,)).fetchone():
+            continue
         if row["url"] in EXCLUDED_URLS:
             continue
         before = archive_connection.total_changes
